@@ -165,4 +165,5 @@ x_vals = [x for x, _ in node_dict.values()]
 y_vals = [y for _, y in node_dict.values()]
 plt.title("Truss – tension (blue) / compression (red)")
 plt.tight_layout()
+plt.axis('equal')
 plt.show()
