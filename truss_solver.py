@@ -129,9 +129,8 @@ print(f"TOTAL COST   : ${total_cost:,.2f}\n")
 # ────────────────────────────────────────────────────────────────────────────────
 # 6.  Quick plot
 # ────────────────────────────────────────────────────────────────────────────────
-fig, ax1 = plt.subplots(figsize=(11,4))
+fig, ax1 = plt.subplots(figsize=(15,6))
 ys = [y for _,y in node_dict.values()]
-ax1.set_ylim(min(ys)-2, max(ys)+2)
 
 for eid,(i,j) in elements.items():
     x=[node_dict[i][0], node_dict[j][0]]
@@ -139,20 +138,31 @@ for eid,(i,j) in elements.items():
     col='blue' if forces[eid]>0 else 'red' if forces[eid]<0 else 'k'
     ax1.plot(x,y,col,lw=2)
     xm,ym=(x[0]+x[1])/2,(y[0]+y[1])/2
-    ax1.text(xm,ym,f"{abs(forces[eid]):.1f}",fontsize=8,ha='center',va='center')
+    ax1.text(xm,ym,f"{abs(forces[eid]):.1f}",fontsize=8,ha='center',va='center',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
 
 for n,(x,y) in node_dict.items():
     ax1.plot(x,y,'ko'); ax1.text(x,y+0.25,str(n),ha='center')
 
-ax2 = ax1.twinx()
+# Calculate force_scale so that the largest force arrow is about the same as the truss size
+truss_width = max(x for x, _ in node_dict.values()) - min(x for x, _ in node_dict.values())
+truss_height = max(y for _, y in node_dict.values()) - min(y for _, y in node_dict.values())
+truss_size = min(truss_width, truss_height)
+max_force = max(np.hypot(fx, fy) for fx, fy in load_dict.values()) if load_dict else 1.0
+force_scale = truss_size / max_force if max_force != 0 else 1.0
+force_scale /= 2
+
 for n,(fx,fy) in load_dict.items():
-    ax2.arrow(node_dict[n][0], node_dict[n][1], fx, fy,
+    ax1.arrow(node_dict[n][0], node_dict[n][1], fx * force_scale, fy * force_scale,
               head_width=0.12, head_length=0.25, fc='green', ec='green')
-ax2.set_ylim(ax1.get_ylim()[0]*5, ax1.get_ylim()[1]*5)
-ax2.tick_params(axis='y', labelcolor='green')
-ax2.set_ylabel("kN")
+    xm,ym=node_dict[n][0]+fx*force_scale/2,node_dict[n][1]+fy*force_scale/2
+    ax1.text(xm,ym,f"{np.hypot(fx, fy)}kN",fontsize=8,ha='center',va='center',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
 
 ax1.grid(True)
 ax1.set_xlabel("m");  ax1.set_ylabel("m")
+plt.margins(x=0.15, y=0.15)
+# Expand plot limits for more space around the truss
+x_vals = [x for x, _ in node_dict.values()]
+y_vals = [y for _, y in node_dict.values()]
 plt.title("Truss – tension (blue) / compression (red)")
-plt.tight_layout();  plt.show()
+plt.tight_layout()
+plt.show()
