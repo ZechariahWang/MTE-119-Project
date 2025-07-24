@@ -25,6 +25,14 @@ def read_from_csvs(paths):
     opts_df    = pd.read_json(paths[3], typ='series').to_frame().T if len(paths) > 3 else pd.DataFrame()
     return nodes_df, members_df, loads_df, opts_df
 
+def read_from_folder(folder):
+    folder = pathlib.Path(folder)
+    nodes_df   = pd.read_csv(folder / 'nodes.csv')
+    members_df = pd.read_csv(folder / 'members.csv')
+    loads_df   = pd.read_csv(folder / 'loads.csv')
+    opts_df    = pd.read_json(folder / 'options.json', typ='series').to_frame().T if (folder / 'options.json').exists() else pd.DataFrame()
+    return nodes_df, members_df, loads_df, opts_df
+
 if len(sys.argv) < 2:
     print("Give an Excel file (nodes/members/loads) or 3‑4 CSVs!")
     sys.exit(1)
@@ -33,10 +41,13 @@ in_files = [pathlib.Path(p) for p in sys.argv[1:]]
 if in_files[0].suffix.lower() in ('.xlsx', '.xls'):
     nodes, members, loads, opts = read_from_excel(in_files[0])
 else:
-    if len(in_files) < 3:
-        print("Need at least nodes.csv  members.csv  loads.csv")
-        sys.exit(1)
-    nodes, members, loads, opts = read_from_csvs(in_files)
+    if len(in_files) == 1 and in_files[0].is_dir():
+        nodes, members, loads, opts = read_from_folder(in_files[0])
+    else:
+        if len(in_files) < 3:
+            print("Need at least nodes.csv  members.csv  loads.csv")
+            sys.exit(1)
+        nodes, members, loads, opts = read_from_csvs(in_files)
 
 # ────────────────────────────────────────────────────────────────────────────────
 # 2.  Convert to convenient Python structures
