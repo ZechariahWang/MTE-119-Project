@@ -1,0 +1,6 @@
+{
+  "T_limit": 8,
+  "C_limit": 5,
+  "cost_per_m": 9,
+  "cost_gusset": 5
+}
