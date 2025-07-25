@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # truss_adjuster.py
 #
-# Usage: python truss_adjuster.py <folder_path> <adjustment_strength> <worse_move_tolerance> <worse_move_probability>
+# Usage: python truss_adjuster.py <folder_path> <adjustment_strength>
 
 import sys, math, json, pathlib, random, time
 import numpy as np, pandas as pd
@@ -89,7 +89,7 @@ def calculate_cost(nodes, members, loads, supports, opts):
 # ────────────────────────────────────────────────────────────────────────────────
 # 3.  Main adjustment loop
 # ────────────────────────────────────────────────────────────────────────────────
-def adjust_truss(folder_path, adjustment_strength, worse_move_tolerance, worse_move_probability):
+def adjust_truss(folder_path, adjustment_strength):
     nodes_df, members_df, loads_df, opts_df = read_from_folder(folder_path)
     
     supports = {int(r.id): (bool(r.fix_x), bool(r.fix_y)) for r in nodes_df.itertuples()}
@@ -156,18 +156,14 @@ def adjust_truss(folder_path, adjustment_strength, worse_move_tolerance, worse_m
                 best_nodes_df = new_nodes_df.copy()
                 best_nodes_df.to_csv(pathlib.Path(folder_path) / 'nodes.csv', index=False)
                 print(f"Iteration {iteration}: New best cost: ${best_cost:,.2f} - Saved to nodes.csv")
-        elif new_cost < best_cost * worse_move_tolerance and random.random() < worse_move_probability:
-            nodes_df = new_nodes_df
-            current_cost = new_cost
-            print(f"Iteration {iteration}: Accepted a worse state with cost ${current_cost:,.2f} to escape local minimum (best is ${best_cost:,.2f}).")
         
         if iteration % 100 == 0:
             print(f"Iteration {iteration}: Current best cost: ${best_cost:,.2f}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print("Usage: python truss_adjuster.py <folder_path> <adjustment_strength> <worse_move_tolerance> <worse_move_probability>")
-        print("Example: python truss_adjuster.py ./bridge\ 1 0.1 1.2 0.05")
+    if len(sys.argv) != 3:
+        print("Usage: python truss_adjuster.py <folder_path> <adjustment_strength>")
+        print("Example: python truss_adjuster.py ./bridge_folder 0.1")
         sys.exit(1)
     
     folder = sys.argv[1]
@@ -176,8 +172,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     adjustment_strength = float(sys.argv[2])
-    worse_move_tolerance = float(sys.argv[3])
-    worse_move_probability = float(sys.argv[4])
     print(f"Starting truss adjustment in folder: {folder} with adjustment strength: {adjustment_strength}")
-    print(f"Worse move tolerance: {worse_move_tolerance}, probability: {worse_move_probability}")
-    adjust_truss(folder, adjustment_strength, worse_move_tolerance, worse_move_probability)
+    adjust_truss(folder, adjustment_strength)
