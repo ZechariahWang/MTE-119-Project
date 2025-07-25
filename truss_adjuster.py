@@ -156,8 +156,8 @@ def adjust_truss(folder_path, adjustment_strength=0.1):
             print(f"Iteration {iteration}: Current best cost: ${best_cost:,.2f}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python truss_adjuster.py <folder_path>")
+    if len(sys.argv) > 3:
+        print("Usage: python truss_adjuster.py <folder_path> [adjustment_strength]")
         sys.exit(1)
     
     folder = sys.argv[1]
@@ -165,4 +165,6 @@ if __name__ == "__main__":
         print(f"Error: Folder not found at '{folder}'")
         sys.exit(1)
 
-    adjust_truss(folder)
+    adjustment_strength = float(sys.argv[2]) if len(sys.argv) > 2 else 0.1
+    print(f"Starting truss adjustment in folder: {folder} with adjustment strength: {adjustment_strength}")
+    adjust_truss(folder, adjustment_strength)
