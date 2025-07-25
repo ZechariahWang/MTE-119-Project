@@ -159,8 +159,8 @@ for n,(fx,fy) in load_dict.items():
 
 ax1.grid(True)
 ax1.set_xlabel("m");  ax1.set_ylabel("m")
-plt.margins(x=0.15, y=0.15)
 plt.title("Truss – tension (blue) / compression (red)")
 plt.tight_layout()
 plt.axis('equal')
+plt.margins(x=0.25, y=0.5)
 plt.show()
