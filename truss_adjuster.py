@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # truss_adjuster.py
 #
-# Usage: python truss_adjuster.py <folder_path>
+# Usage: python truss_adjuster.py <folder_path> <adjustment_strength> <worse_move_tolerance> <worse_move_probability>
 
 import sys, math, json, pathlib, random, time
 import numpy as np, pandas as pd
@@ -89,7 +89,7 @@ def calculate_cost(nodes, members, loads, supports, opts):
 # ────────────────────────────────────────────────────────────────────────────────
 # 3.  Main adjustment loop
 # ────────────────────────────────────────────────────────────────────────────────
-def adjust_truss(folder_path, adjustment_strength=0.1, worse_move_tolerance=1.2, worse_move_probability=0.05):
+def adjust_truss(folder_path, adjustment_strength, worse_move_tolerance, worse_move_probability):
     nodes_df, members_df, loads_df, opts_df = read_from_folder(folder_path)
     
     supports = {int(r.id): (bool(r.fix_x), bool(r.fix_y)) for r in nodes_df.itertuples()}
@@ -165,8 +165,9 @@ def adjust_truss(folder_path, adjustment_strength=0.1, worse_move_tolerance=1.2,
             print(f"Iteration {iteration}: Current best cost: ${best_cost:,.2f}")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 5:
-        print("Usage: python truss_adjuster.py <folder_path> [adjustment_strength] [worse_move_tolerance] [worse_move_probability]")
+    if len(sys.argv) != 5:
+        print("Usage: python truss_adjuster.py <folder_path> <adjustment_strength> <worse_move_tolerance> <worse_move_probability>")
+        print("Example: python truss_adjuster.py ./bridge\ 1 0.1 1.2 0.05")
         sys.exit(1)
     
     folder = sys.argv[1]
@@ -174,9 +175,9 @@ if __name__ == "__main__":
         print(f"Error: Folder not found at '{folder}'")
         sys.exit(1)
 
-    adjustment_strength = float(sys.argv[2]) if len(sys.argv) > 2 else 0.1
-    worse_move_tolerance = float(sys.argv[3]) if len(sys.argv) > 3 else 1.2
-    worse_move_probability = float(sys.argv[4]) if len(sys.argv) > 4 else 0.05
+    adjustment_strength = float(sys.argv[2])
+    worse_move_tolerance = float(sys.argv[3])
+    worse_move_probability = float(sys.argv[4])
     print(f"Starting truss adjustment in folder: {folder} with adjustment strength: {adjustment_strength}")
     print(f"Worse move tolerance: {worse_move_tolerance}, probability: {worse_move_probability}")
     adjust_truss(folder, adjustment_strength, worse_move_tolerance, worse_move_probability)
