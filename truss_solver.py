@@ -160,9 +160,6 @@ for n,(fx,fy) in load_dict.items():
 ax1.grid(True)
 ax1.set_xlabel("m");  ax1.set_ylabel("m")
 plt.margins(x=0.15, y=0.15)
-# Expand plot limits for more space around the truss
-x_vals = [x for x, _ in node_dict.values()]
-y_vals = [y for _, y in node_dict.values()]
 plt.title("Truss – tension (blue) / compression (red)")
 plt.tight_layout()
 plt.axis('equal')
