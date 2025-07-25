@@ -14,7 +14,7 @@ def read_from_folder(folder):
     nodes_df   = pd.read_csv(folder / 'nodes.csv')
     members_df = pd.read_csv(folder / 'members.csv')
     loads_df   = pd.read_csv(folder / 'loads.csv')
-    opts_df    = pd.read_json(folder / 'options.json', typ='series').to_frame().T if (folder / 'options.json').exists() else pd.DataFrame()
+    opts_df    = pd.read_csv(folder / 'options.csv') if (folder / 'options.csv').exists() else pd.DataFrame()
     return nodes_df, members_df, loads_df, opts_df
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -64,10 +64,10 @@ def calculate_cost(nodes, members, loads, supports, opts):
     elements    = {int(r.id): (int(r.start), int(r.end)) for r in members.itertuples()}
     load_dict   = {int(r.node): (float(r.Fx), float(r.Fy)) for r in loads.itertuples()}
 
-    T_LIMIT      = opts.get('T_limit',  8.0).iloc[0] if not opts.empty else 8.0
-    C_LIMIT      = opts.get('C_limit',  5.0).iloc[0] if not opts.empty else 5.0
-    COST_PER_M   = opts.get('cost_per_m', 9.0).iloc[0] if not opts.empty else 9.0
-    COST_GUSSET  = opts.get('cost_gusset', 5.0).iloc[0] if not opts.empty else 5.0
+    T_LIMIT      = float(opts['T_limit'].iloc[0]) if not opts.empty and 'T_limit' in opts.columns and not opts['T_limit'].dropna().empty else 8.0
+    C_LIMIT      = float(opts['C_limit'].iloc[0]) if not opts.empty and 'C_limit' in opts.columns and not opts['C_limit'].dropna().empty else 5.0
+    COST_PER_M   = float(opts['cost_per_m'].iloc[0]) if not opts.empty and 'cost_per_m' in opts.columns and not opts['cost_per_m'].dropna().empty else 9.0
+    COST_GUSSET  = float(opts['cost_gusset'].iloc[0]) if not opts.empty and 'cost_gusset' in opts.columns and not opts['cost_gusset'].dropna().empty else 5.0
 
     u, Ls, dirs = build_system(node_dict, elements, load_dict, supports)
     if u is None:
@@ -102,6 +102,17 @@ def adjust_truss(folder_path, adjustment_strength=0.1):
         print("No movable nodes found. Exiting.")
         sys.exit(0)
 
+    # Handle symmetrical nodes
+    symmetrical_pairs = {}
+    if not opts_df.empty and 'symmetrical_nodes' in opts_df.columns:
+        symmetrical_nodes = opts_df['symmetrical_nodes'].dropna().astype(str).str.split('-').tolist()
+        for pair in symmetrical_nodes:
+            if len(pair) == 2:
+                node1, node2 = int(pair[0]), int(pair[1])
+                symmetrical_pairs[node1] = node2
+                symmetrical_pairs[node2] = node1
+        print(f"Symmetry enabled for node pairs: {symmetrical_nodes}")
+
     best_cost = calculate_cost(nodes_df, members_df, loads_df, supports, opts_df)
     print(f"Initial cost: ${best_cost:,.2f}")
 
@@ -116,8 +127,22 @@ def adjust_truss(folder_path, adjustment_strength=0.1):
         node_to_adjust_idx = random.choice(movable_nodes)
         
         # Adjust x and y coordinates
-        new_nodes_df.loc[node_to_adjust_idx, 'x'] += random.uniform(-adjustment_strength, adjustment_strength)
-        new_nodes_df.loc[node_to_adjust_idx, 'y'] += random.uniform(-adjustment_strength, adjustment_strength)
+        dx = random.uniform(-adjustment_strength, adjustment_strength)
+        dy = random.uniform(-adjustment_strength, adjustment_strength)
+        new_nodes_df.loc[node_to_adjust_idx, 'x'] += dx
+        new_nodes_df.loc[node_to_adjust_idx, 'y'] += dy
+
+        # Enforce symmetry if applicable
+        node_id_to_adjust = int(new_nodes_df.loc[node_to_adjust_idx, 'id'])
+        if node_id_to_adjust in symmetrical_pairs:
+            partner_id = symmetrical_pairs[node_id_to_adjust]
+            partner_indices = new_nodes_df[new_nodes_df['id'] == partner_id].index
+            if len(partner_indices) > 0:
+                partner_idx = partner_indices[0]
+                
+                # Enforce y-axis symmetry
+                new_nodes_df.loc[partner_idx, 'x'] -= dx
+                new_nodes_df.loc[partner_idx, 'y'] += dy
 
         new_cost = calculate_cost(new_nodes_df, members_df, loads_df, supports, opts_df)
 
