@@ -60,9 +60,46 @@ def member_forces(nodes, elems, u, Ls, dirs, E=1.0):
     return np.array(N)
 
 def calculate_cost(nodes, members, loads, supports, opts):
+    def process_loads(loads_df, nodes_df):
+        load_dict = {}
+        node_pos_dict = {int(r.id): (r.x, r.y) for r in nodes_df.itertuples()}
+
+        for r in loads_df.itertuples():
+            node_val = str(r.node)
+            fx = getattr(r, 'Fx', 0.0); fy = getattr(r, 'Fy', 0.0)
+            fx = 0.0 if pd.isna(fx) else float(fx)
+            fy = 0.0 if pd.isna(fy) else float(fy)
+
+            if '-' in node_val:  # Pressure load
+                node_ids = [int(n) for n in node_val.split('-')]
+                if len(node_ids) < 2: continue
+                if not all(nid in node_pos_dict for nid in node_ids): continue
+
+                x = {nid: node_pos_dict[nid][0] for nid in node_ids}
+                y = {nid: node_pos_dict[nid][1] for nid in node_ids}
+
+                for i, nid in enumerate(node_ids):
+                    nfx, nfy = 0.0, 0.0
+                    if fy != 0:
+                        if i == 0: nfy = (x[node_ids[i+1]] - x[nid]) / 2.0 * fy
+                        elif i == len(node_ids)-1: nfy = (x[nid] - x[node_ids[i-1]]) / 2.0 * fy
+                        else: nfy = (x[node_ids[i+1]] - x[node_ids[i-1]]) / 2.0 * fy
+                    if fx != 0:
+                        if i == 0: nfx = (y[node_ids[i+1]] - y[nid]) / 2.0 * fx
+                        elif i == len(node_ids)-1: nfx = (y[nid] - y[node_ids[i-1]]) / 2.0 * fx
+                        else: nfx = (y[node_ids[i+1]] - y[node_ids[i-1]]) / 2.0 * fx
+                    
+                    if nid in load_dict: load_dict[nid] = (load_dict[nid][0] + nfx, load_dict[nid][1] + nfy)
+                    else: load_dict[nid] = (nfx, nfy)
+            else:  # Point load
+                nid = int(node_val)
+                if nid in load_dict: load_dict[nid] = (load_dict[nid][0] + fx, load_dict[nid][1] + fy)
+                else: load_dict[nid] = (fx, fy)
+        return load_dict
+
     node_dict   = {int(r.id): (float(r.x), float(r.y)) for r in nodes.itertuples()}
     elements    = {int(r.id): (int(r.start), int(r.end)) for r in members.itertuples()}
-    load_dict   = {int(r.node): (float(r.Fx), float(r.Fy)) for r in loads.itertuples()}
+    load_dict   = process_loads(loads, nodes)
 
     T_LIMIT      = float(opts['T_limit'].iloc[0]) if not opts.empty and 'T_limit' in opts.columns and not opts['T_limit'].dropna().empty else 8.0
     C_LIMIT      = float(opts['C_limit'].iloc[0]) if not opts.empty and 'C_limit' in opts.columns and not opts['C_limit'].dropna().empty else 5.0
@@ -93,12 +130,24 @@ def adjust_truss(folder_path, adjustment_strength):
     nodes_df, members_df, loads_df, opts_df = read_from_folder(folder_path)
     
     supports = {int(r.id): (bool(r.fix_x), bool(r.fix_y)) for r in nodes_df.itertuples()}
-    if 'movable' in nodes_df.columns:
+    
+    possible_adjustments = []
+    if 'movable_x' in nodes_df.columns and 'movable_y' in nodes_df.columns:
+        for idx, row in nodes_df.iterrows():
+            if not row.fix_x and row.movable_x: possible_adjustments.append((idx, 'x'))
+            if not row.fix_y and row.movable_y: possible_adjustments.append((idx, 'y'))
+    elif 'movable' in nodes_df.columns:
         movable_nodes = [idx for idx, row in nodes_df.iterrows() if row.movable and not (row.fix_x or row.fix_y)]
+        for idx in movable_nodes:
+            possible_adjustments.append((idx, 'x'))
+            possible_adjustments.append((idx, 'y'))
     else:
         movable_nodes = [idx for idx, row in nodes_df.iterrows() if not (row.fix_x or row.fix_y)]
+        for idx in movable_nodes:
+            possible_adjustments.append((idx, 'x'))
+            possible_adjustments.append((idx, 'y'))
 
-    if not movable_nodes:
+    if not possible_adjustments:
         print("No movable nodes found. Exiting.")
         sys.exit(0)
 
@@ -125,14 +174,18 @@ def adjust_truss(folder_path, adjustment_strength):
         # Create a copy to modify from the current state
         new_nodes_df = nodes_df.copy()
 
-        # Pick a random movable node and adjust its position
-        node_to_adjust_idx = random.choice(movable_nodes)
+        # Pick a random movable node and axis and adjust its position
+        node_to_adjust_idx, axis_to_adjust = random.choice(possible_adjustments)
         
-        # Adjust x and y coordinates
-        dx = random.uniform(-adjustment_strength, adjustment_strength)
-        dy = random.uniform(-adjustment_strength, adjustment_strength)
-        new_nodes_df.loc[node_to_adjust_idx, 'x'] += dx
-        new_nodes_df.loc[node_to_adjust_idx, 'y'] += dy
+        adjustment = random.uniform(-adjustment_strength, adjustment_strength)
+        dx, dy = 0, 0
+
+        if axis_to_adjust == 'x':
+            dx = adjustment
+            new_nodes_df.loc[node_to_adjust_idx, 'x'] += dx
+        else: # 'y'
+            dy = adjustment
+            new_nodes_df.loc[node_to_adjust_idx, 'y'] += dy
 
         # Enforce symmetry if applicable
         node_id_to_adjust = int(new_nodes_df.loc[node_to_adjust_idx, 'id'])

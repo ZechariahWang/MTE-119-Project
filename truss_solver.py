@@ -52,10 +52,49 @@ else:
 # ────────────────────────────────────────────────────────────────────────────────
 # 2.  Convert to convenient Python structures
 # ────────────────────────────────────────────────────────────────────────────────
+def process_loads(loads_df, nodes_df):
+    load_dict = {}
+    node_pos_dict = {int(r.id): (r.x, r.y) for r in nodes_df.itertuples()}
+
+    for r in loads_df.itertuples():
+        node_val = str(r.node)
+        fx = getattr(r, 'Fx', 0.0); fy = getattr(r, 'Fy', 0.0)
+        fx = 0.0 if pd.isna(fx) else float(fx)
+        fy = 0.0 if pd.isna(fy) else float(fy)
+
+        if '-' in node_val:  # Pressure load
+            node_ids = [int(n) for n in node_val.split('-')]
+            if len(node_ids) < 2: continue
+            if not all(nid in node_pos_dict for nid in node_ids):
+                print(f"Warning: Pressure load '{node_val}' has missing nodes. Skipping.")
+                continue
+
+            x = {nid: node_pos_dict[nid][0] for nid in node_ids}
+            y = {nid: node_pos_dict[nid][1] for nid in node_ids}
+
+            for i, nid in enumerate(node_ids):
+                nfx, nfy = 0.0, 0.0
+                if fy != 0:
+                    if i == 0: nfy = (x[node_ids[i+1]] - x[nid]) / 2.0 * fy
+                    elif i == len(node_ids)-1: nfy = (x[nid] - x[node_ids[i-1]]) / 2.0 * fy
+                    else: nfy = (x[node_ids[i+1]] - x[node_ids[i-1]]) / 2.0 * fy
+                if fx != 0:
+                    if i == 0: nfx = (y[node_ids[i+1]] - y[nid]) / 2.0 * fx
+                    elif i == len(node_ids)-1: nfx = (y[nid] - y[node_ids[i-1]]) / 2.0 * fx
+                    else: nfx = (y[node_ids[i+1]] - y[node_ids[i-1]]) / 2.0 * fx
+                
+                if nid in load_dict: load_dict[nid] = (load_dict[nid][0] + nfx, load_dict[nid][1] + nfy)
+                else: load_dict[nid] = (nfx, nfy)
+        else:  # Point load
+            nid = int(node_val)
+            if nid in load_dict: load_dict[nid] = (load_dict[nid][0] + fx, load_dict[nid][1] + fy)
+            else: load_dict[nid] = (fx, fy)
+    return load_dict
+
 node_dict   = {int(r.id): (float(r.x), float(r.y))          for r in nodes.itertuples()}
 supports    = {int(r.id): (bool(r.fix_x), bool(r.fix_y))    for r in nodes.itertuples()}
 elements    = {int(r.id): (int(r.start), int(r.end))        for r in members.itertuples()}
-load_dict   = {int(r.node): (float(r.Fx), float(r.Fy))      for r in loads.itertuples()}
+load_dict   = process_loads(loads, nodes)
 
 # Defaults / overrides
 T_LIMIT      = opts.get('T_limit',  8.0).iloc[0] if not opts.empty else 8.0
