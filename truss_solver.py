@@ -194,7 +194,7 @@ for n,(fx,fy) in load_dict.items():
     ax1.arrow(node_dict[n][0], node_dict[n][1], fx * force_scale, fy * force_scale,
               head_width=0.12, head_length=0.25, fc='green', ec='green')
     xm,ym=node_dict[n][0]+fx*force_scale/2,node_dict[n][1]+fy*force_scale/2
-    ax1.text(xm,ym,f"{np.hypot(fx, fy)}kN",fontsize=8,ha='center',va='center',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
+    ax1.text(xm,ym,f"{np.hypot(fx, fy):0.3f}kN",fontsize=8,ha='center',va='center',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
 
 ax1.grid(True)
 ax1.set_xlabel("m");  ax1.set_ylabel("m")
