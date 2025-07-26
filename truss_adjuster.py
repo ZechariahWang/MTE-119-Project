@@ -126,7 +126,7 @@ def calculate_cost(nodes, members, loads, supports, opts):
 # ────────────────────────────────────────────────────────────────────────────────
 # 3.  Main adjustment loop
 # ────────────────────────────────────────────────────────────────────────────────
-def adjust_truss(folder_path, adjustment_strength):
+def adjust_truss(folder_path, adjustment_strength, chaos_probability=0.0, return_threshold=1.0):
     nodes_df, members_df, loads_df, opts_df = read_from_folder(folder_path)
     
     supports = {int(r.id): (bool(r.fix_x), bool(r.fix_y)) for r in nodes_df.itertuples()}
@@ -209,14 +209,23 @@ def adjust_truss(folder_path, adjustment_strength):
                 best_nodes_df = new_nodes_df.copy()
                 best_nodes_df.to_csv(pathlib.Path(folder_path) / 'nodes.csv', index=False)
                 print(f"Iteration {iteration}: New best cost: ${best_cost:,.2f} - Saved to nodes.csv")
+        elif random.random() < chaos_probability:
+            if new_cost < return_threshold * best_cost:
+                nodes_df = new_nodes_df
+                current_cost = new_cost
+                print(f"Iteration {iteration}: Accepted worse cost due to chaos: ${new_cost:,.2f}")
+            else:
+                nodes_df = best_nodes_df.copy()
+                current_cost = best_cost
+                print(f"Iteration {iteration}: Returning to best_cost state due to chaos: ${new_cost:,.2f}")
         
         if iteration % 100 == 0:
-            print(f"Iteration {iteration}: Current best cost: ${best_cost:,.2f}")
+            print(f"Iteration {iteration}: Current cost: ${current_cost:,.2f}, Best cost: ${best_cost:,.2f}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python truss_adjuster.py <folder_path> <adjustment_strength>")
-        print("Example: python truss_adjuster.py ./bridge_folder 0.1")
+    if len(sys.argv) not in [3, 5]:
+        print("Usage: python truss_adjuster.py <folder_path> <adjustment_strength> [chaos_probability] <return_threshold>")
+        print("Example: python truss_adjuster.py ./bridge_folder 0.1 0.05 1.2")
         sys.exit(1)
     
     folder = sys.argv[1]
@@ -225,5 +234,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     adjustment_strength = float(sys.argv[2])
-    print(f"Starting truss adjustment in folder: {folder} with adjustment strength: {adjustment_strength}")
-    adjust_truss(folder, adjustment_strength)
+    chaos_probability = float(sys.argv[3]) if len(sys.argv) >= 4 else 0.0
+    return_threshold = float(sys.argv[4]) if len(sys.argv) >= 5 else 1.0
+
+    print(f"Starting truss adjustment in folder: {folder} with adjustment strength: {adjustment_strength}, chaos: {chaos_probability}, return threshold: {return_threshold}")
+    adjust_truss(folder, adjustment_strength, chaos_probability, return_threshold)
