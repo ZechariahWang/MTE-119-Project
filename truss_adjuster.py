@@ -109,25 +109,18 @@ def calculate_cost(nodes, members, loads, supports, opts):
     u, Ls, dirs = build_system(node_dict, elements, load_dict, supports)
     if u is None:
         return float('inf')
-
-    # Check for distance constraints
-    if not opts.empty:
-        if 'min_dist' in opts.columns:
-            for val in opts['min_dist'].dropna():
-                parts = str(val).split(':')
-                if len(parts) == 2:
-                    node_pair, min_d = parts
-                    node1, node2 = map(int, node_pair.split('-'))
-                    if dist(node_dict[node1], node_dict[node2]) < float(min_d):
-                        return float('inf')
-        if 'max_dist' in opts.columns:
-            for val in opts['max_dist'].dropna():
-                parts = str(val).split(':')
-                if len(parts) == 2:
-                    node_pair, max_d = parts
-                    node1, node2 = map(int, node_pair.split('-'))
-                    if dist(node_dict[node1], node_dict[node2]) > float(max_d):
-                        return float('inf')
+    
+    # Check for member length constraints
+    if 'min_dist' in members.columns:
+        for i, min_d in enumerate(members['min_dist']):
+            if pd.notna(min_d):
+                if Ls[i] < float(min_d):
+                    return float('inf')
+    if 'max_dist' in members.columns:
+        for i, max_d in enumerate(members['max_dist']):
+            if pd.notna(max_d):
+                if Ls[i] > float(max_d):
+                    return float('inf')
 
     forces = member_forces(node_dict, elements, u, Ls, dirs)
     
