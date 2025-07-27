@@ -59,6 +59,15 @@ def member_forces(nodes, elems, u, Ls, dirs, E=1.0):
         ul = u[dof];  N.append((E/L)*np.dot([-cx,-cy,cx,cy],ul))
     return np.array(N)
 
+def is_valid(nodes, min_dist=0.1):
+    node_positions = nodes[['x', 'y']].to_numpy()
+    for i, pos1 in enumerate(node_positions):
+        for j, pos2 in enumerate(node_positions):
+            if i >= j: continue
+            if dist(pos1, pos2) < min_dist:
+                return False
+    return True
+
 def calculate_cost(nodes, members, loads, supports, opts):
     def process_loads(loads_df, nodes_df):
         load_dict = {}
@@ -210,6 +219,9 @@ def adjust_truss(folder_path, adjustment_strength, chaos_probability=0.0, return
                 # Enforce y-axis symmetry
                 new_nodes_df.loc[partner_idx, 'x'] -= dx
                 new_nodes_df.loc[partner_idx, 'y'] += dy
+
+        if not is_valid(new_nodes_df):
+            continue
 
         new_cost = calculate_cost(new_nodes_df, members_df, loads_df, supports, opts_df)
 
