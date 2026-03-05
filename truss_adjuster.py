@@ -81,7 +81,7 @@ def adjust_truss(folder_path, adjustment_strength,
     current_score = best_score
 
     def score_str(s):
-        return f"{-s:.2f} N/kg" if s != float('inf') else "infeasible"
+        return f"{-s/9.81:.2f} g/g" if s != float('inf') else "infeasible"
 
     print(f"Initial PV: {score_str(best_score)}")
 
