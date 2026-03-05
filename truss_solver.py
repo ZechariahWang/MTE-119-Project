@@ -89,6 +89,8 @@ for v in result['violations']:
 # ═══════════════════════════════════════════════════════════════════════════════
 print("\n=== Member Analysis ===")
 print(f"  Section      : {SECTION_W_MM} x {SECTION_T_MM} mm  (A = {SECTION_A_MM2:.2f} mm2)")
+print(f"  Euler params : E = {BALSA_E_MPA:.0f} MPa,  I = per-member (I_mm4 column in members.csv)")
+print(f"               P_cr = pi^2 * E * I / L^2  (pin-pin, K=1)")
 print(f"  Cap T/C      : read from members.csv  (Max_Tension_N / Max_Compression_N columns)")
 print()
 

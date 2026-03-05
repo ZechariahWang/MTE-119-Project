@@ -1,5 +1,6 @@
 {
   "density_kg_m3":    160.0,
+  "E_mpa":           3400.0,
   "num_faces":            2,
   "height_target_cm":  10.0
 }

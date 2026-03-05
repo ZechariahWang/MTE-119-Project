@@ -26,6 +26,15 @@ SECTION_W_MM        = 14.3
 SECTION_T_MM        =  3.2
 SECTION_A_MM2       = SECTION_W_MM * SECTION_T_MM          # 45.76 mm2
 
+# Second moment of area  *** UPDATE FROM LAB RESULTS / actual cross-section ***
+# Minimum I governs Euler buckling (bending about the weak axis).
+# For a solid rectangle: I_min = w * t^3 / 12  (t is the smaller dimension).
+# Default is computed from SECTION_W_MM and SECTION_T_MM; override in options.json.
+SECTION_I_MM4       = SECTION_W_MM * SECTION_T_MM**3 / 12  # ~39.05 mm4  <- UPDATE
+
+# Balsa Young's modulus  *** UPDATE FROM LAB RESULTS ***
+BALSA_E_MPA         = 3400.0        # MPa (typical balsa range 2000-5000)  <- UPDATE
+
 # Balsa density  *** UPDATE FROM LAB RESULTS ***
 BALSA_DENSITY_KG_M3 = 160.0         # kg/m3 (typical balsa range 100-200)  <- UPDATE
 
@@ -71,15 +80,17 @@ def apply_options(opts: dict):
     Recognised keys
     ---------------
     density_kg_m3    -- balsa density for mass calculation
+    E_mpa            -- balsa Young's modulus (MPa) for Euler buckling
     num_faces        -- number of parallel planar faces in 3-D truss
     height_target_cm -- default height target for solver height sweep
 
-    Tension/compression limits per member come from members.csv
-    (Max_Tension_N and Max_Compression_N columns), not from options.json.
+    Tension/compression limits and I_mm4 per member come from members.csv
+    (Max_Tension_N, Max_Compression_N, and I_mm4 columns), not from options.json.
     """
-    global BALSA_DENSITY_KG_M3, NUM_FACES, TRUSS_HEIGHT_TARGET_CM
+    global BALSA_DENSITY_KG_M3, BALSA_E_MPA, NUM_FACES, TRUSS_HEIGHT_TARGET_CM
 
     if 'density_kg_m3'    in opts: BALSA_DENSITY_KG_M3   = float(opts['density_kg_m3'])
+    if 'E_mpa'            in opts: BALSA_E_MPA            = float(opts['E_mpa'])
     if 'num_faces'        in opts: NUM_FACES              = int(opts['num_faces'])
     if 'height_target_cm' in opts: TRUSS_HEIGHT_TARGET_CM = float(opts['height_target_cm'])
 
@@ -283,7 +294,7 @@ def scale_to_target_height(nd, target_cm):
 # Physical failure capacities
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def member_capacities(L_cm):
+def member_capacities(L_cm, I_mm4=None):
     """
     Return (max_tension_N, max_compression_N) for a member of length L_cm.
 
@@ -295,13 +306,25 @@ def member_capacities(L_cm):
 
     Compression
     -----------
-    min( empirical buckling limit,  MAX_COMPRESSION_BEARING_N )
-      buckling  = 2e6 x L_mm^-2.32   (pin-pin, L in mm)
-      bearing   = MAX_COMPRESSION_BEARING_N from options.json (uniform joint cap)
-    The buckling limit varies with member length; bearing is the same for all.
+    min( Euler buckling load,  MAX_COMPRESSION_BEARING_N )
+
+      Euler buckling (pin-pin, K = 1):
+          P_cr = pi^2 * E * I / L^2
+
+      where:
+          E  = BALSA_E_MPA         (MPa = N/mm2)  -- set in options.json as "E_mpa"
+          I  = I_mm4 parameter     (mm4)           -- per-member value from members.csv
+                                                      falls back to SECTION_I_MM4 if None
+          L  = member length       (mm)
+
+      bearing = MAX_COMPRESSION_BEARING_N (uniform joint cap)
+
+    The buckling limit is length-dependent; bearing is the same for all members.
     """
+    import math
+    I = I_mm4 if I_mm4 is not None else SECTION_I_MM4
     L_mm = L_cm * 10           # coordinates are in cm; formula needs mm
-    buckling_N        = 2e6 * (L_mm ** -2.32)
+    buckling_N        = (math.pi**2 * BALSA_E_MPA * I) / (L_mm**2)
     max_compression_N = min(buckling_N, MAX_COMPRESSION_BEARING_N)
     return MAX_TENSION_N, max_compression_N
 
@@ -370,9 +393,15 @@ def compute_pv(node_dict, elements, load_dict, supports, members_df=None,
     # column is absent or the value is NaN.
     has_T = members_df is not None and 'Max_Tension_N'     in members_df.columns
     has_C = members_df is not None and 'Max_Compression_N' in members_df.columns
+    has_I = members_df is not None and 'I_mm4'             in members_df.columns
     cap_T, cap_C = [], []
     for eid in range(len(elements)):
-        t_default, c_default = member_capacities(Ls[eid])
+        I_mm4 = None
+        if has_I:
+            val = members_df.iloc[eid]['I_mm4']
+            if not pd.isna(val):
+                I_mm4 = float(val)
+        t_default, c_default = member_capacities(Ls[eid], I_mm4)
 
         if has_T:
             val = members_df.iloc[eid]['Max_Tension_N']
