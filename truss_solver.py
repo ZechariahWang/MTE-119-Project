@@ -1,205 +1,173 @@
 #!/usr/bin/env python3
 # truss_solver.py
 #
-# Usage:  python truss_solver.py  bridge.xlsx          # Excel with sheets
-#     or  python truss_solver.py  nodes.csv members.csv loads.csv  [options.json]
+# Usage:  python truss_solver.py  <folder>
+#     or  python truss_solver.py  nodes.csv members.csv loads.csv
+#     or  python truss_solver.py  bridge.xlsx
+#
+# Physics, FEA, and I/O live in truss_physics.py (shared with truss_adjuster.py).
 
-import sys, math, json, pathlib
-import numpy as np, pandas as pd, matplotlib.pyplot as plt
+import sys, json, pathlib
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from truss_physics import *
 
-# ────────────────────────────────────────────────────────────────────────────────
-# 1.  Read input ─ Excel workbook OR individual CSVs
-# ────────────────────────────────────────────────────────────────────────────────
-def read_from_excel(fname: pathlib.Path):
-    xls = pd.ExcelFile(fname)
-    nodes_df   = xls.parse('Nodes')
-    members_df = xls.parse('Members')
-    loads_df   = xls.parse('Loads')
-    opts_df    = xls.parse('Options') if 'Options' in xls.sheet_names else pd.DataFrame()
-    return nodes_df, members_df, loads_df, opts_df
+# ═══════════════════════════════════════════════════════════════════════════════
+# Height sweep parameter  --  adjust between 9.5 and 10.5 cm to optimise PV
+# ═══════════════════════════════════════════════════════════════════════════════
+TRUSS_HEIGHT_TARGET_CM = 9.5        # <- change this value, re-run, compare PV
 
-def read_from_csvs(paths):
-    nodes_df   = pd.read_csv(paths[0])
-    members_df = pd.read_csv(paths[1])
-    loads_df   = pd.read_csv(paths[2])
-    opts_df    = pd.read_json(paths[3], typ='series').to_frame().T if len(paths) > 3 else pd.DataFrame()
-    return nodes_df, members_df, loads_df, opts_df
+# ═══════════════════════════════════════════════════════════════════════════════
+# Load physical parameters from options.json (overrides defaults in truss_physics)
+# ═══════════════════════════════════════════════════════════════════════════════
+_opts_path = pathlib.Path('options.json')
+if _opts_path.exists():
+    apply_options(json.load(open(_opts_path)))
 
-def read_from_folder(folder):
-    folder = pathlib.Path(folder)
-    nodes_df   = pd.read_csv(folder / 'nodes.csv')
-    members_df = pd.read_csv(folder / 'members.csv')
-    loads_df   = pd.read_csv(folder / 'loads.csv')
-    opts_df    = pd.read_json(folder / 'options.json', typ='series').to_frame().T if (folder / 'options.json').exists() else pd.DataFrame()
-    return nodes_df, members_df, loads_df, opts_df
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# Read input
+# ═══════════════════════════════════════════════════════════════════════════════
 if len(sys.argv) < 2:
-    print("Give an Excel file (nodes/members/loads) or 3‑4 CSVs!")
+    print("Usage: python truss_solver.py <folder | excel | csvs>")
     sys.exit(1)
 
-in_files = [pathlib.Path(p) for p in sys.argv[1:]]
+src_folder = None
+in_files   = [pathlib.Path(p) for p in sys.argv[1:]]
+
 if in_files[0].suffix.lower() in ('.xlsx', '.xls'):
-    nodes, members, loads, opts = read_from_excel(in_files[0])
+    nodes, members, loads, _ = read_from_excel(in_files[0])
+elif len(in_files) == 1 and in_files[0].is_dir():
+    src_folder = in_files[0]
+    nodes, members, loads, _ = read_from_folder(src_folder)
 else:
-    if len(in_files) == 1 and in_files[0].is_dir():
-        nodes, members, loads, opts = read_from_folder(in_files[0])
-    else:
-        if len(in_files) < 3:
-            print("Need at least nodes.csv  members.csv  loads.csv")
-            sys.exit(1)
-        nodes, members, loads, opts = read_from_csvs(in_files)
+    if len(in_files) < 3:
+        print("Need at least: nodes.csv  members.csv  loads.csv")
+        sys.exit(1)
+    nodes, members, loads, _ = read_from_csvs(in_files)
 
-# ────────────────────────────────────────────────────────────────────────────────
-# 2.  Convert to convenient Python structures
-# ────────────────────────────────────────────────────────────────────────────────
-def process_loads(loads_df, nodes_df):
-    load_dict = {}
-    node_pos_dict = {int(r.id): (r.x, r.y) for r in nodes_df.itertuples()}
+node_dict = {int(r.id): (float(r.x), float(r.y))       for r in nodes.itertuples()}
+supports  = {int(r.id): (bool(r.fix_x), bool(r.fix_y)) for r in nodes.itertuples()}
+elements  = {int(r.id): (int(r.start), int(r.end))      for r in members.itertuples()}
+load_dict = process_loads(loads, nodes)
 
-    for r in loads_df.itertuples():
-        node_val = str(r.node)
-        fx = getattr(r, 'Fx', 0.0); fy = getattr(r, 'Fy', 0.0)
-        fx = 0.0 if pd.isna(fx) else float(fx)
-        fy = 0.0 if pd.isna(fy) else float(fy)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Analyse  (geometry is height-scaled; violations are reported but not enforced)
+# ═══════════════════════════════════════════════════════════════════════════════
+result = compute_pv(node_dict, elements, load_dict, supports, members,
+                    target_height_cm=TRUSS_HEIGHT_TARGET_CM,
+                    enforce_geometry=False)
 
-        if '-' in node_val:  # Pressure load
-            node_ids = [int(n) for n in node_val.split('-')]
-            if len(node_ids) < 2: continue
-            if not all(nid in node_pos_dict for nid in node_ids):
-                print(f"Warning: Pressure load '{node_val}' has missing nodes. Skipping.")
-                continue
+if result is None:
+    print("ERROR: FEA system is singular -- check geometry / supports.")
+    sys.exit(1)
 
-            x = {nid: node_pos_dict[nid][0] for nid in node_ids}
-            y = {nid: node_pos_dict[nid][1] for nid in node_ids}
+nd        = result['node_dict']
+forces    = result['forces']
+cap_T     = result['cap_T']    # tension limit per member (N)
+cap_C     = result['cap_C']    # compression limit per member = min(buckling, bearing cap) (N)
+Ls        = result['Ls']
+length_cm = result['length_cm']
+height_cm = result['height_cm']
+pv        = result['pv']
 
-            for i, nid in enumerate(node_ids):
-                nfx, nfy = 0.0, 0.0
-                if fy != 0:
-                    if i == 0: nfy = (x[node_ids[i+1]] - x[nid]) / 2.0 * fy
-                    elif i == len(node_ids)-1: nfy = (x[nid] - x[node_ids[i-1]]) / 2.0 * fy
-                    else: nfy = (x[node_ids[i+1]] - x[node_ids[i-1]]) / 2.0 * fy
-                if fx != 0:
-                    if i == 0: nfx = (y[node_ids[i+1]] - y[nid]) / 2.0 * fx
-                    elif i == len(node_ids)-1: nfx = (y[nid] - y[node_ids[i-1]]) / 2.0 * fx
-                    else: nfx = (y[node_ids[i+1]] - y[node_ids[i-1]]) / 2.0 * fx
-                
-                if nid in load_dict: load_dict[nid] = (load_dict[nid][0] + nfx, load_dict[nid][1] + nfy)
-                else: load_dict[nid] = (nfx, nfy)
-        else:  # Point load
-            nid = int(node_val)
-            if nid in load_dict: load_dict[nid] = (load_dict[nid][0] + fx, load_dict[nid][1] + fy)
-            else: load_dict[nid] = (fx, fy)
-    return load_dict
+# ═══════════════════════════════════════════════════════════════════════════════
+# Geometry validation report
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n=== Geometry Validation ===")
+if result['geom_ok']:
+    print(f"  OK  Span   = {length_cm:.2f} cm  [{LENGTH_MIN_CM}-{LENGTH_MAX_CM} cm]")
+    print(f"  OK  Height = {height_cm:.2f} cm  [{HEIGHT_MIN_CM}-{HEIGHT_MAX_CM} cm]"
+          f"  (target = {TRUSS_HEIGHT_TARGET_CM} cm)")
+for v in result['violations']:
+    print(v)
 
-node_dict   = {int(r.id): (float(r.x), float(r.y))          for r in nodes.itertuples()}
-supports    = {int(r.id): (bool(r.fix_x), bool(r.fix_y))    for r in nodes.itertuples()}
-elements    = {int(r.id): (int(r.start), int(r.end))        for r in members.itertuples()}
-load_dict   = process_loads(loads, nodes)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Member analysis table
+# ═══════════════════════════════════════════════════════════════════════════════
+print("\n=== Member Analysis ===")
+print(f"  Section      : {SECTION_W_MM} x {SECTION_T_MM} mm  (A = {SECTION_A_MM2:.2f} mm2)")
+print(f"  Cap T/C      : read from members.csv  (Max_Tension_N / Max_Compression_N columns)")
+print()
 
-# Defaults / overrides
-T_LIMIT      = opts.get('T_limit',  8.0).iloc[0] if not opts.empty else 8.0
-C_LIMIT      = opts.get('C_limit',  5.0).iloc[0] if not opts.empty else 5.0
-COST_PER_M   = opts.get('cost_per_m', 9.0).iloc[0] if not opts.empty else 9.0
-COST_GUSSET  = opts.get('cost_gusset', 5.0).iloc[0] if not opts.empty else 5.0
+hdr = (f"{'ID':>3}  {'Nodes':>7}  {'L mm':>6}  "
+       f"{'Force N':>9}  {'T/C':>3}  {'MaxT N':>7}  {'MaxC N':>7}  Status")
+print(hdr)
+print("-" * len(hdr))
 
-# ────────────────────────────────────────────────────────────────────────────────
-# 3.  FEA helpers
-# ────────────────────────────────────────────────────────────────────────────────
-def dist(p,q): return np.hypot(*(np.subtract(p,q)))
+any_fail = False
+for eid, (i, j) in elements.items():
+    f   = forces[eid]
+    typ = "T" if f > 0 else ("C" if f < 0 else "-")
+    tT, tC = cap_T[eid], cap_C[eid]
+    if   f > 0 and abs(f) > tT: status = "FAIL-T !!"; any_fail = True
+    elif f < 0 and abs(f) > tC: status = "FAIL-C !!"; any_fail = True
+    else:                        status = "OK"
 
-def build_system(nodes, elems, loads, supports, E=1.0):
-    ndof = 2*len(nodes);  K = np.zeros((ndof, ndof));  F = np.zeros(ndof)
-    Ls, dirs = [], []
+    print(f"{eid:>3}  {i:>3}->{j:<3}  {Ls[eid]*10:>6.1f}  "
+          f"{f:>9.2f}  {typ:>3}  {tT:>7.1f}  {tC:>7.1f}  {status}")
 
-    for (i,j) in elems.values():
-        xi,yi = nodes[i];  xj,yj = nodes[j]
-        L  = dist((xi,yi),(xj,yj));  cx,cy = (xj-xi)/L, (yj-yi)/L
-        k = (E/L)*np.array([[ cx*cx, cx*cy, -cx*cx, -cx*cy],
-                            [ cx*cy, cy*cy, -cx*cy, -cy*cy],
-                            [-cx*cx,-cx*cy,  cx*cx,  cx*cy],
-                            [-cx*cy,-cy*cy,  cx*cy,  cy*cy]])
-        dof = [2*i, 2*i+1, 2*j, 2*j+1]
-        K[np.ix_(dof,dof)] += k
-        Ls.append(L); dirs.append((cx,cy))
+# ═══════════════════════════════════════════════════════════════════════════════
+# Performance Value summary
+# ═══════════════════════════════════════════════════════════════════════════════
+print(f"\n=== Performance Value  (height = {height_cm:.2f} cm) ===")
+print(f"  Reference load      : {result['ref_load_N']:.3f} N")
+print(f"  First-failure mult. : {result['load_multiplier']:.4f}")
+print(f"  Max applicable load : {result['max_load_N']:.2f} N")
+print(f"  Truss mass          : {result['mass_kg']*1000:.3f} g"
+      f"  ({NUM_FACES} faces, rho = {BALSA_DENSITY_KG_M3} kg/m3)")
+print(f"  PV                  = {pv:.1f} N/kg")
+if any_fail:
+    print("  *** WARNING: member(s) exceed capacity at current load scale ***")
+if not result['geom_ok']:
+    print("  *** WARNING: geometry constraint violated -- fix span/height first ***")
 
-    for n,(fx,fy) in loads.items():
-        F[2*n] += fx; F[2*n+1] += fy
+# ═══════════════════════════════════════════════════════════════════════════════
+# Write computed limits back to members.csv
+# ═══════════════════════════════════════════════════════════════════════════════
+members['Section_A_mm2']     = [round(result['areas'][eid], 4) for eid in range(len(elements))]
+members['Max_Tension_N']     = [round(cap_T[eid], 2)           for eid in range(len(elements))]
+members['Max_Compression_N'] = [round(cap_C[eid], 2)           for eid in range(len(elements))]
 
-    fixed = [2*n   for n,(fx,_) in supports.items() if fx] + \
-            [2*n+1 for n,(_,fy) in supports.items() if fy]
-    free = [d for d in range(ndof) if d not in fixed]
+if src_folder is not None:
+    out_path = pathlib.Path(src_folder) / 'members.csv'
+    members.to_csv(out_path, index=False)
+    print(f"\n  members.csv updated -> {out_path}")
+else:
+    print("\n  (run with a folder argument to auto-save members.csv)")
 
-    u = np.zeros(ndof);  u[free] = np.linalg.solve(K[np.ix_(free,free)], F[free])
-    return u, Ls, dirs
+# ═══════════════════════════════════════════════════════════════════════════════
+# Plot  --  blue = tension, red = compression, magenta = failure
+# ═══════════════════════════════════════════════════════════════════════════════
+fig, ax = plt.subplots(figsize=(15, 6))
 
-def member_forces(nodes, elems, u, Ls, dirs, E=1.0):
-    N=[]
-    for eid,(i,j) in elems.items():
-        cx,cy = dirs[eid];  L = Ls[eid];  dof = [2*i,2*i+1,2*j,2*j+1]
-        ul = u[dof];  N.append((E/L)*np.dot([-cx,-cy,cx,cy],ul))
-    return np.array(N)
+for eid, (i, j) in elements.items():
+    f  = forces[eid]
+    tT, tC = cap_T[eid], cap_C[eid]
+    failed = (f > 0 and abs(f) > tT) or (f < 0 and abs(f) > tC)
+    col = 'magenta' if failed else ('blue' if f > 0 else ('red' if f < 0 else 'black'))
+    x = [nd[i][0], nd[j][0]]; y = [nd[i][1], nd[j][1]]
+    ax.plot(x, y, col, lw=3 if failed else 2)
+    ax.text((x[0]+x[1])/2, (y[0]+y[1])/2, f"{abs(f):.1f}", fontsize=7,
+            ha='center', va='center',
+            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.2'))
 
-# ────────────────────────────────────────────────────────────────────────────────
-# 4.  Analysis
-# ────────────────────────────────────────────────────────────────────────────────
-u, Ls, dirs = build_system(node_dict, elements, load_dict, supports)
-forces      = member_forces(node_dict, elements, u, Ls, dirs)
+for n, (x, y) in nd.items():
+    ax.plot(x, y, 'ko', ms=5)
+    ax.text(x, y + 0.05 * height_cm, str(n), ha='center', fontsize=8)
 
-dup = [max(1, math.ceil(abs(f)/(T_LIMIT if f>0 else C_LIMIT))) for f in forces]
+max_f  = max((abs(fy) for fx, fy in load_dict.values()), default=1.0)
+fscale = min(length_cm, height_cm) / max_f / 4 if max_f else 1.0
+for n, (fx, fy) in load_dict.items():
+    ax.arrow(nd[n][0], nd[n][1], fx*fscale, fy*fscale,
+             head_width=0.08, head_length=0.15, fc='green', ec='green')
 
-cost_members = sum(COST_PER_M * Ls[eid] * dup[eid] for eid in range(len(elements)))
-cost_gusset  = COST_GUSSET * len(node_dict)
-total_cost   = cost_members + cost_gusset
-
-# ────────────────────────────────────────────────────────────────────────────────
-# 5.  Console report
-# ────────────────────────────────────────────────────────────────────────────────
-print("\n=== Truss Analysis from spreadsheet ===")
-print("Limits:  Tension ≤ %.1f kN   Compression ≤ %.1f kN" % (T_LIMIT, C_LIMIT))
-print("\nID  Force(kN) Type  #Bars  Len(m)  Segment‑Cost($)")
-for eid,(i,j) in elements.items():
-    typ = "T" if forces[eid]>0 else "C" if forces[eid]<0 else "-"
-    seg = COST_PER_M * Ls[eid] * dup[eid]
-    print(f"{eid:2d}  {forces[eid]:9.2f}  {typ}    {dup[eid]:2d}   {Ls[eid]:6.2f}      {seg:7.2f}")
-
-print(f"\nGusset plates: {len(node_dict)} × ${COST_GUSSET:.0f} = {cost_gusset:.2f}")
-print(f"TOTAL COST   : ${total_cost:,.2f}\n")
-
-# ────────────────────────────────────────────────────────────────────────────────
-# 6.  Quick plot
-# ────────────────────────────────────────────────────────────────────────────────
-fig, ax1 = plt.subplots(figsize=(15,6))
-ys = [y for _,y in node_dict.values()]
-
-for eid,(i,j) in elements.items():
-    x=[node_dict[i][0], node_dict[j][0]]
-    y=[node_dict[i][1], node_dict[j][1]]
-    col='blue' if forces[eid]>0 else 'red' if forces[eid]<0 else 'k'
-    ax1.plot(x,y,col,lw=2)
-    xm,ym=(x[0]+x[1])/2,(y[0]+y[1])/2
-    ax1.text(xm,ym,f"{abs(forces[eid]):.1f}",fontsize=8,ha='center',va='center',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
-
-for n,(x,y) in node_dict.items():
-    ax1.plot(x,y,'ko'); ax1.text(x,y+0.25,str(n),ha='center')
-
-# Calculate force_scale so that the largest force arrow is about the same as the truss size
-truss_width = max(x for x, _ in node_dict.values()) - min(x for x, _ in node_dict.values())
-truss_height = max(y for _, y in node_dict.values()) - min(y for _, y in node_dict.values())
-truss_size = min(truss_width, truss_height)
-max_force = max(np.hypot(fx, fy) for fx, fy in load_dict.values()) if load_dict else 1.0
-force_scale = truss_size / max_force if max_force != 0 else 1.0
-force_scale /= 2
-
-for n,(fx,fy) in load_dict.items():
-    ax1.arrow(node_dict[n][0], node_dict[n][1], fx * force_scale, fy * force_scale,
-              head_width=0.12, head_length=0.25, fc='green', ec='green')
-    xm,ym=node_dict[n][0]+fx*force_scale/2,node_dict[n][1]+fy*force_scale/2
-    ax1.text(xm,ym,f"{np.hypot(fx, fy):0.3f}kN",fontsize=8,ha='center',va='center',bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
-
-ax1.grid(True)
-ax1.set_xlabel("m");  ax1.set_ylabel("m")
-plt.title("Truss – tension (blue) / compression (red)")
+ax.set_aspect('equal'); ax.grid(True)
+ax.set_xlabel("cm"); ax.set_ylabel("cm")
+ax.margins(x=0.2, y=0.4)
+plt.title(f"H={height_cm:.2f} cm  L={length_cm:.2f} cm  PV={pv:.1f} N/kg"
+          f"  |  blue=T  red=C  magenta=FAIL")
 plt.tight_layout()
-plt.axis('equal')
-plt.margins(x=0.25, y=0.5)
 plt.show()

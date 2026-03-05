@@ -1,6 +1,5 @@
 {
-  "T_limit": 8,
-  "C_limit": 5,
-  "cost_per_m": 9,
-  "cost_gusset": 5
+  "density_kg_m3":    160.0,
+  "num_faces":            2,
+  "height_target_cm":  10.0
 }
