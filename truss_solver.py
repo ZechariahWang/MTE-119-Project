@@ -58,7 +58,7 @@ load_dict = process_loads(loads, nodes)
 # ═══════════════════════════════════════════════════════════════════════════════
 result = compute_pv(node_dict, elements, load_dict, supports, members,
                     target_height_cm=TRUSS_HEIGHT_TARGET_CM,
-                    enforce_geometry=False)
+                    enforce_geometry=True)
 
 if result is None:
     print("ERROR: FEA system is singular -- check geometry / supports.")
@@ -91,7 +91,8 @@ print("\n=== Member Analysis ===")
 print(f"  Section      : {SECTION_W_MM} x {SECTION_T_MM} mm  (A = {SECTION_A_MM2:.2f} mm2)")
 print(f"  Euler params : E = {BALSA_E_MPA:.0f} MPa,  I = per-member (I_mm4 column in members.csv)")
 print(f"               P_cr = pi^2 * E * I / L^2  (pin-pin, K=1)")
-print(f"  Cap T/C      : read from members.csv  (Max_Tension_N / Max_Compression_N columns)")
+print(f"  Cap T        : Max_Tension_N from members.csv")
+print(f"  Cap C        : min( Euler buckling P_cr=pi^2*E*I/L^2,  Max_Compression_N from members.csv )")
 print()
 
 hdr = (f"{'ID':>3}  {'Nodes':>7}  {'L mm':>6}  "
@@ -114,13 +115,15 @@ for eid, (i, j) in elements.items():
 # ═══════════════════════════════════════════════════════════════════════════════
 # Performance Value summary
 # ═══════════════════════════════════════════════════════════════════════════════
+pv_gg = pv / 9.81   # convert N/kg -> g/g  (grams-force / gram)
+
 print(f"\n=== Performance Value  (height = {height_cm:.2f} cm) ===")
-print(f"  Reference load      : {result['ref_load_N']:.3f} N")
+print(f"  Reference load      : {result['ref_load_N']/9.81*1000:.3f} gf")
 print(f"  First-failure mult. : {result['load_multiplier']:.4f}")
-print(f"  Max applicable load : {result['max_load_N']:.2f} N")
+print(f"  Max applicable load : {result['max_load_N']/9.81*1000:.2f} gf")
 print(f"  Truss mass          : {result['mass_kg']*1000:.3f} g"
       f"  ({NUM_FACES} faces, rho = {BALSA_DENSITY_KG_M3} kg/m3)")
-print(f"  PV                  = {pv:.1f} N/kg")
+print(f"  PV                  = {pv_gg:.1f} g/g")
 if any_fail:
     print("  *** WARNING: member(s) exceed capacity at current load scale ***")
 if not result['geom_ok']:
@@ -129,9 +132,8 @@ if not result['geom_ok']:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Write computed limits back to members.csv
 # ═══════════════════════════════════════════════════════════════════════════════
-members['Section_A_mm2']     = [round(result['areas'][eid], 4) for eid in range(len(elements))]
-members['Max_Tension_N']     = [round(cap_T[eid], 2)           for eid in range(len(elements))]
-members['Max_Compression_N'] = [round(cap_C[eid], 2)           for eid in range(len(elements))]
+members['Section_A_mm2'] = [round(result['areas'][eid], 4) for eid in range(len(elements))]
+members['Max_Tension_N'] = [round(cap_T[eid], 2)           for eid in range(len(elements))]
 
 if src_folder is not None:
     out_path = pathlib.Path(src_folder) / 'members.csv'
@@ -169,7 +171,7 @@ for n, (fx, fy) in load_dict.items():
 ax.set_aspect('equal'); ax.grid(True)
 ax.set_xlabel("cm"); ax.set_ylabel("cm")
 ax.margins(x=0.2, y=0.4)
-plt.title(f"H={height_cm:.2f} cm  L={length_cm:.2f} cm  PV={pv:.1f} N/kg"
+plt.title(f"H={height_cm:.2f} cm  L={length_cm:.2f} cm  PV={pv_gg:.1f} g/g"
           f"  |  blue=T  red=C  magenta=FAIL")
 plt.tight_layout()
 plt.show()

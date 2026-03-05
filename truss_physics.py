@@ -311,11 +311,12 @@ def compute_pv(node_dict, elements, load_dict, supports, members_df=None,
 
     Failure modes considered
     ------------------------
-    cap_T and cap_C are read directly from members.csv (Max_Tension_N and
-    Max_Compression_N columns).  Those values should already reflect all relevant
-    failure modes (normal stress, bearing, buckling, etc.) as determined from lab
-    results or manual calculation.  member_capacities() is used only as a fallback
-    when a column is absent or a cell is NaN.
+    cap_T  -- read from Max_Tension_N column in members.csv.
+              Falls back to float('inf') if absent or NaN.
+    cap_C  -- min( Euler buckling, Max_Compression_N ) checked simultaneously.
+              Euler buckling is always computed fresh from current length and I_mm4.
+              Max_Compression_N from members.csv is an additional cap (e.g. bearing
+              failure); if absent or NaN, only Euler buckling governs.
 
     Parameters
     ----------
@@ -372,7 +373,7 @@ def compute_pv(node_dict, elements, load_dict, supports, members_df=None,
             val = members_df.iloc[eid]['I_mm4']
             if not pd.isna(val):
                 I_mm4 = float(val)
-        t_default, c_default = member_capacities(Ls[eid], I_mm4)
+        t_default, c_euler = member_capacities(Ls[eid], I_mm4)
 
         if has_T:
             val = members_df.iloc[eid]['Max_Tension_N']
@@ -382,9 +383,9 @@ def compute_pv(node_dict, elements, load_dict, supports, members_df=None,
 
         if has_C:
             val = members_df.iloc[eid]['Max_Compression_N']
-            c = float(val) if not pd.isna(val) else c_default
+            c = min(c_euler, float(val)) if not pd.isna(val) else c_euler
         else:
-            c = c_default
+            c = c_euler
 
         cap_T.append(t); cap_C.append(c)
 
