@@ -158,6 +158,4 @@ if __name__ == '__main__':
     ret  = float(sys.argv[4]) if len(sys.argv) >= 5 else 1.0
 
     print(f"Optimising PV in '{folder}'  adj={adj}  chaos={chao}  return={ret}")
-    print(f"Physical params: tensile={BALSA_TENSILE_MPA} MPa  "
-          f"bearing={BALSA_BEARING_MPA} MPa  rho={BALSA_DENSITY_KG_M3} kg/m3")
     adjust_truss(folder, adj, chao, ret)

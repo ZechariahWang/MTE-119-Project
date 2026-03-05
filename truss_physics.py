@@ -38,27 +38,6 @@ BALSA_E_MPA         = 3400.0        # MPa (typical balsa range 2000-5000)  <- UP
 # Balsa density  *** UPDATE FROM LAB RESULTS ***
 BALSA_DENSITY_KG_M3 = 160.0         # kg/m3 (typical balsa range 100-200)  <- UPDATE
 
-# Force limits  *** SET IN options.json — update from lab results ***
-#
-# MAX_TENSION_N       -- max axial tensile force any member can carry (N).
-#                        Should reflect the governing failure mode from testing
-#                        (normal stress rupture or bearing/crushing at the pin,
-#                        whichever is lower).
-#
-# MAX_COMPRESSION_BEARING_N -- uniform compression cap from bearing/crushing at the
-#                        pin joint (N).  Buckling (per-member, length-dependent) is
-#                        applied on top; effective limit = min(buckling, this value).
-#
-# Defaults below are computed from typical material properties as a starting point.
-# Override them in options.json once you have measured values.
-_BALSA_TENSILE_MPA   = 20.0         # used only to compute the default below
-_BALSA_BEARING_MPA   = 15.0         # used only to compute the default below
-_PIN_DIA_MM          = 25.4 / 8     # 3.175 mm
-_BEARING_A_MM2       = _PIN_DIA_MM * SECTION_T_MM           # 10.16 mm2
-
-MAX_TENSION_N             = min(_BALSA_TENSILE_MPA * SECTION_A_MM2,
-                                _BALSA_BEARING_MPA * _BEARING_A_MM2)  # 152.4 N
-MAX_COMPRESSION_BEARING_N = _BALSA_BEARING_MPA * _BEARING_A_MM2       # 152.4 N
 
 # Height optimisation target -- solver sweeps this; adjuster enforces the range
 TRUSS_HEIGHT_TARGET_CM = 10.0
@@ -300,33 +279,25 @@ def member_capacities(L_cm, I_mm4=None):
 
     Tension
     -------
-    MAX_TENSION_N from options.json -- a single measured/calculated force limit
-    that already accounts for whichever failure mode governs (normal stress rupture
-    or bearing/crushing at the pin joint).  Same value for every member.
+    Returns float('inf') as fallback -- tension limits must be set per member
+    in the Max_Tension_N column of members.csv.
 
     Compression
     -----------
-    min( Euler buckling load,  MAX_COMPRESSION_BEARING_N )
-
-      Euler buckling (pin-pin, K = 1):
-          P_cr = pi^2 * E * I / L^2
+    Euler buckling (pin-pin, K = 1):
+        P_cr = pi^2 * E * I / L^2
 
       where:
-          E  = BALSA_E_MPA         (MPa = N/mm2)  -- set in options.json as "E_mpa"
-          I  = I_mm4 parameter     (mm4)           -- per-member value from members.csv
-                                                      falls back to SECTION_I_MM4 if None
-          L  = member length       (mm)
-
-      bearing = MAX_COMPRESSION_BEARING_N (uniform joint cap)
-
-    The buckling limit is length-dependent; bearing is the same for all members.
+          E  = BALSA_E_MPA   (MPa = N/mm2)  -- set in options.json as "E_mpa"
+          I  = I_mm4         (mm4)           -- per-member value from members.csv
+                                                falls back to SECTION_I_MM4 if None
+          L  = member length (mm)
     """
     import math
     I = I_mm4 if I_mm4 is not None else SECTION_I_MM4
     L_mm = L_cm * 10           # coordinates are in cm; formula needs mm
-    buckling_N        = (math.pi**2 * BALSA_E_MPA * I) / (L_mm**2)
-    max_compression_N = min(buckling_N, MAX_COMPRESSION_BEARING_N)
-    return MAX_TENSION_N, max_compression_N
+    buckling_N = (math.pi**2 * BALSA_E_MPA * I) / (L_mm**2)
+    return float('inf'), buckling_N
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
