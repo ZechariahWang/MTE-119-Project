@@ -16,11 +16,6 @@ import pandas as pd
 from truss_physics import *
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Height sweep parameter  --  adjust between 9.5 and 10.5 cm to optimise PV
-# ═══════════════════════════════════════════════════════════════════════════════
-TRUSS_HEIGHT_TARGET_CM = 9.5        # <- change this value, re-run, compare PV
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Load physical parameters from options.json (overrides defaults in truss_physics)
 # ═══════════════════════════════════════════════════════════════════════════════
 _opts_path = pathlib.Path('options.json')
@@ -57,7 +52,7 @@ load_dict = process_loads(loads, nodes)
 # Analyse  (geometry is height-scaled; violations are reported but not enforced)
 # ═══════════════════════════════════════════════════════════════════════════════
 result = compute_pv(node_dict, elements, load_dict, supports, members,
-                    target_height_cm=TRUSS_HEIGHT_TARGET_CM,
+                    target_height_cm=None,
                     enforce_geometry=True)
 
 if result is None:
@@ -79,8 +74,7 @@ pv        = result['pv']
 print("\n=== Geometry Validation ===")
 if result['geom_ok']:
     print(f"  OK  Span   = {length_cm:.2f} cm  [{LENGTH_MIN_CM}-{LENGTH_MAX_CM} cm]")
-    print(f"  OK  Height = {height_cm:.2f} cm  [{HEIGHT_MIN_CM}-{HEIGHT_MAX_CM} cm]"
-          f"  (target = {TRUSS_HEIGHT_TARGET_CM} cm)")
+    print(f"  OK  Height = {height_cm:.2f} cm  [{HEIGHT_MIN_CM}-{HEIGHT_MAX_CM} cm]")
 for v in result['violations']:
     print(v)
 
